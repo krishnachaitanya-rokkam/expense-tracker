@@ -1,0 +1,11 @@
+{
+  "name": "Expense Tracker",
+  "short_name": "Expenses",
+  "start_url": "./index.html",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#f4f6fa",
+  "theme_color": "#101828",
+  "description": "Long-term personal finance and expense tracker."
+}
