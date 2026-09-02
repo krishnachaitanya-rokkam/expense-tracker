@@ -1,0 +1,197 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#111827">
+<link rel="manifest" href="manifest.json">
+<title>Expense Tracker</title>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<style>
+*{box-sizing:border-box}body{margin:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;background:#f1f8f7;color:#18312f}
+header{background:linear-gradient(135deg,#0f766e,#2563eb);color:white;padding:18px 16px 14px;position:sticky;top:0;z-index:5}
+h1{font-size:22px;margin:0}.ver{font-size:11px;opacity:.65;margin-top:3px}
+nav{display:flex;gap:7px;margin-top:14px;overflow:auto}nav button{border:0;background:rgba(255,255,255,.18);color:#fff;border-radius:10px;padding:9px 12px;white-space:nowrap}nav button.active{background:#fff;color:#0f766e}
+main{max-width:900px;margin:auto;padding:14px}.page{display:none}.page.active{display:block}
+.card{background:#ffffff;border-radius:18px;padding:15px;margin-bottom:12px;box-shadow:0 6px 20px rgba(15,118,110,.08)}
+.grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}.grid3{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px}
+.metric{padding:13px;border-radius:13px;background:#ecfdf5}.metric b{display:block;font-size:20px;margin-top:5px}.muted{color:#64748b;font-size:13px}
+label{display:block;font-size:13px;font-weight:600;margin:10px 0 5px}input,select,textarea{width:100%;padding:11px;border:1px solid #d1d5db;border-radius:10px;background:#fff;font-size:15px}textarea{min-height:70px}
+button.primary{width:100%;border:0;border-radius:11px;padding:13px;background:linear-gradient(135deg,#0f766e,#2563eb);color:#fff;font-weight:700;margin-top:12px}button.secondary{border:1px solid #d1d5db;background:#fff;border-radius:9px;padding:8px 10px}
+.row{display:flex;gap:8px;align-items:center;justify-content:space-between}.tx{padding:12px 0;border-bottom:1px solid #eee}.tx:last-child{border-bottom:0}.amount{font-weight:700}.expense{color:#b91c1c}.investment{color:#7c3aed}.income{color:#047857}
+.barrow{margin:10px 0}.barlabel{display:flex;justify-content:space-between;font-size:13px}.barbg{height:9px;background:#e5e7eb;border-radius:20px;overflow:hidden;margin-top:5px}.bar{height:100%;background:#0f766e;border-radius:20px}
+.small{font-size:12px}.pill{display:inline-block;padding:4px 8px;border-radius:99px;background:#e0f2fe;font-size:11px}
+.empty{text-align:center;padding:22px;color:#64748b}.danger{color:#b91c1c}.actions{display:flex;gap:6px}
+.metric:nth-child(1){background:#ecfeff}.metric:nth-child(2){background:#fef2f2}.metric:nth-child(3){background:#f5f3ff}.metric:nth-child(4){background:#ecfdf5}.metric:nth-child(5){background:#eff6ff}.metric:nth-child(6){background:#f0fdfa}
+input:focus,select:focus,textarea:focus{outline:2px solid rgba(37,99,235,.18);border-color:#2563eb}
+button.secondary:hover{background:#f0fdfa}
+@media(max-width:600px){.grid3{grid-template-columns:1fr 1fr}.grid{grid-template-columns:1fr 1fr}main{padding:10px}}
+.authbox{background:#ffffff;border-radius:18px;padding:18px;margin-bottom:12px;box-shadow:0 6px 20px rgba(15,118,110,.08)}.authbox h2{margin:0 0 5px}.status{font-size:13px;color:#64748b;margin-top:6px}.warning{font-size:12px;color:#92400e;margin-top:8px}
+</style>
+</head>
+<body>
+<header>
+<div class="row"><div><h1>Expense Tracker</h1><div class="ver">Cloud • Secure & Synced</div></div><button class="secondary" id="numbersBtn">Numbers</button></div>
+<nav id="nav"></nav>
+</header>
+<div id="auth" class="authbox"><h2>Cloud Sync</h2><div id="authStatus" class="status">Checking login…</div><div id="authForm" style="display:none"><label>Email</label><input id="loginEmail" type="email" autocomplete="email" placeholder="Your email"><label>Password</label><input id="loginPassword" type="password" autocomplete="current-password" placeholder="Your password"><div class="grid"><button class="primary" id="loginBtn">Sign in</button><button class="secondary" id="logoutBtn" style="display:none">Sign out</button></div><button class="secondary" id="syncBtn" style="width:100%;margin-top:8px;display:none">Sync local data to cloud</button><div class="warning">Existing local transactions are kept until cloud sync is confirmed.</div></div></div>
+<main>
+<section id="home" class="page active"></section>
+<section id="add" class="page"></section>
+<section id="transactions" class="page"></section>
+<section id="budget" class="page"></section>
+</main>
+<script>
+const SUPABASE_URL="https://zweveffvpqajqrdsnbuu.supabase.co";
+const SUPABASE_PUBLISHABLE_KEY="sb_publishable_KRP_UR66XxeOYs6UAr5Rnw_fQqRMC6n";
+const supabaseClient=window.supabase.createClient(SUPABASE_URL,SUPABASE_PUBLISHABLE_KEY);
+let cloudUser=null;
+async function refreshCloudSession(){
+ const {data:{session}}=await supabaseClient.auth.getSession(); cloudUser=session?.user||null;
+ const s=document.getElementById("authStatus"), f=document.getElementById("authForm"), li=document.getElementById("loginBtn"), lo=document.getElementById("logoutBtn"), sy=document.getElementById("syncBtn");
+ if(!s)return; f.style.display="block";
+ if(cloudUser){s.textContent="Signed in: "+(cloudUser.email||"account");li.style.display="none";lo.style.display="block";sy.style.display="block";await loadCloudTransactions();}
+ else{s.textContent="Not signed in. Local data remains on this device.";li.style.display="block";lo.style.display="none";sy.style.display="none";}
+}
+async function cloudLogin(){const email=document.getElementById("loginEmail").value.trim(),password=document.getElementById("loginPassword").value;if(!email||!password)return alert("Enter your email and password.");const {error}=await supabaseClient.auth.signInWithPassword({email,password});if(error)return alert(error.message);await refreshCloudSession();alert("Signed in successfully.");}
+async function cloudLogout(){await supabaseClient.auth.signOut();cloudUser=null;await refreshCloudSession();}
+async function loadCloudTransactions(){if(!cloudUser)return;const {data,error}=await supabaseClient.from("transactions").select("*").eq("user_id",cloudUser.id).order("date",{ascending:false});if(error){console.error(error);return;}if(data&&data.length){tx=data.map(x=>({id:x.id,date:x.date,type:x.type,merchant:x.merchant||"",category:x.category,payment:x.payment||"",amount:Number(x.amount),notes:x.notes||"",created:Number(x.created||Date.now()),modified:Number(x.modified||Date.now())}));localStorage.setItem(APP,JSON.stringify(tx));render();}}
+async function syncLocalToCloud(){if(!cloudUser)return alert("Sign in first.");if(!tx.length)return alert("There are no local transactions to sync.");const rows=tx.map(x=>({id:x.id,user_id:cloudUser.id,date:x.date,type:x.type,merchant:x.merchant,category:x.category,payment:x.payment,amount:x.amount,notes:x.notes,created:x.created,modified:x.modified}));const {error}=await supabaseClient.from("transactions").upsert(rows,{onConflict:"id"});if(error)return alert("Cloud sync failed: "+error.message);const {data:check,error:ce}=await supabaseClient.from("transactions").select("id").eq("user_id",cloudUser.id);if(ce)return alert("Sync completed, but verification failed: "+ce.message);alert("Cloud sync complete. "+(check?.length||0)+" transaction(s) verified.");}
+async function saveToCloud(x){if(!cloudUser)return;const {error}=await supabaseClient.from("transactions").upsert({id:x.id,user_id:cloudUser.id,date:x.date,type:x.type,merchant:x.merchant,category:x.category,payment:x.payment,amount:x.amount,notes:x.notes,created:x.created,modified:x.modified},{onConflict:"id"});if(error)console.error("Cloud save failed:",error);}
+async function deleteFromCloud(id){if(!cloudUser)return;const {error}=await supabaseClient.from("transactions").delete().eq("id",id).eq("user_id",cloudUser.id);if(error)console.error("Cloud delete failed:",error);}
+const APP="et7", BUD="et7budget", INC="et7income";
+const expenseCats=["Food","Groceries","Transport","Shopping","Bills","Health","Entertainment","Travel","Education","Other"];
+const invCats=["Mutual Funds","Stocks","SIP","FD","Gold","PPF","NPS","Other Investment"];
+const incomeCats=["Salary","Bonus","Interest","Dividend","Other Income"];
+const accounts=["UPI","Credit Card","Debit Card","Cash","Bank Transfer","Investment Account"];
+let tx=JSON.parse(localStorage.getItem(APP)||"[]"), editing=null;
+const money=n=>"₹"+Number(n||0).toLocaleString("en-IN",{maximumFractionDigits:2});
+const esc=s=>String(s??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+function save(){localStorage.setItem(APP,JSON.stringify(tx)); render()}
+function monthKey(d){return d.slice(0,7)}
+function currentMonth(){return new Date().toISOString().slice(0,7)}
+function nav(){
+ const items=[["home","Home"],["add","Add"],["transactions","Transactions"],["budget","Budget"]];
+ document.querySelector("#nav").innerHTML=items.map(([id,n])=>`<button data-page="${id}" class="${location.hash.slice(1)==id||(!location.hash&&id=="home")?"active":""}">${n}</button>`).join("");
+ document.querySelectorAll("nav button").forEach(b=>b.onclick=()=>{
+   if(b.dataset.page==="add"){editing=null;window.newType=null;}
+   location.hash=b.dataset.page;
+   show(b.dataset.page)
+ })
+}
+function show(id){document.querySelectorAll(".page").forEach(x=>x.classList.toggle("active",x.id==id));document.querySelectorAll("nav button").forEach(x=>x.classList.toggle("active",x.dataset.page==id));render()}
+function render(){nav(); renderHome();renderAdd();renderTx();renderBudget()}
+function typeCats(type){return type==="Investment"?invCats:type==="Income"?incomeCats:expenseCats}
+function renderHome(){
+ const m=window.homeMonth||currentMonth(); const rows=tx.filter(x=>monthKey(x.date)==m);
+ const exp=rows.filter(x=>x.type==="Expense").reduce((a,x)=>a+ +x.amount,0);
+ const inv=rows.filter(x=>x.type==="Investment").reduce((a,x)=>a+ +x.amount,0);
+ const inc=rows.filter(x=>x.type==="Income").reduce((a,x)=>a+ +x.amount,0);
+ const days=new Date(m+"-01").getMonth()===new Date().getMonth()&&m==currentMonth()?new Date().getDate():new Date(new Date(m+"-01").getFullYear(),new Date(m+"-01").getMonth()+1,0).getDate();
+ const cats={};rows.filter(x=>x.type==="Expense").forEach(x=>cats[x.category]=(cats[x.category]||0)+ +x.amount);
+ const max=Math.max(1,...Object.values(cats));
+ document.querySelector("#home").innerHTML=`<div class="card"><div class="row"><div><b>Dashboard</b><div class="muted">Monthly overview</div></div><div><input id="month" type="month" value="${m}"></div></div></div>
+ <div class="grid3"><div class="metric"><span class="muted">Total Outflow</span><b>${money(exp+inv)}</b></div><div class="metric"><span class="muted">Expenses</span><b>${money(exp)}</b></div><div class="metric"><span class="muted">Investments</span><b>${money(inv)}</b></div><div class="metric"><span class="muted">Income</span><b>${money(inc)}</b></div><div class="metric"><span class="muted">Daily Avg.</span><b>${money(exp/days)}</b></div><div class="metric"><span class="muted">Net</span><b>${money(inc-exp-inv)}</b></div></div>
+ <div class="card"><b>Spending Trends</b><div class="muted">Daily expense totals for ${esc(m)}</div><div id="bars"></div></div>
+ <div class="card"><b>Category Breakdown</b>${Object.keys(cats).length?Object.entries(cats).sort((a,b)=>b[1]-a[1]).map(([k,v])=>`<div class="barrow"><div class="barlabel"><span>${esc(k)}</span><span>${money(v)}</span></div><div class="barbg"><div class="bar" style="width:${v/max*100}%"></div></div></div>`).join(""):"<div class=empty>No expenses this month</div>"}
+ </div><div class="card"><div class="row"><b>Recent Transactions</b><button class=secondary onclick="location.hash='transactions';show('transactions')">View all</button></div>${tx.slice().sort((a,b)=>b.date.localeCompare(a.date)||b.created-a.created).slice(0,5).map(txRow).join("")||"<div class=empty>No transactions yet</div>"}</div>`;
+ document.querySelector("#month").onchange=e=>{window.homeMonth=e.target.value;renderHome()}
+ const daily={};rows.filter(x=>x.type==="Expense").forEach(x=>{daily[x.date]=(daily[x.date]||0)+ +x.amount});
+ const vals=Object.entries(daily).sort().slice(-14), mx=Math.max(1,...vals.map(x=>x[1]));
+ document.querySelector("#bars").innerHTML=vals.length?vals.map(([d,v])=>`<div class="barrow"><div class="barlabel"><span>${d.slice(5)}</span><span>${money(v)}</span></div><div class="barbg"><div class="bar" style="width:${v/mx*100}%"></div></div></div>`).join(""):"<div class=empty>No daily expenses</div>";
+}
+function txRow(x){
+ const cls=x.type.toLowerCase(); return `<div class=tx><div class=row><div><b>${esc(x.merchant)}</b><div class=muted>${esc(x.category)} • ${esc(x.payment)} • ${x.date}</div></div><div class="amount ${cls}">${x.type==="Income"?"+":"-"}${money(x.amount)}</div></div><div class=small>${esc(x.notes||"")} <span class=pill>${esc(x.type)}</span></div></div>`
+}
+function renderAdd(){
+ const type=editing ? editing.type : (window.newType||"Expense");
+ const cats=typeCats(type);
+ document.querySelector("#add").innerHTML=`<div class=card><b>${editing?"Edit":"Add"} Transaction</b>
+ <label>Type</label><select id=aType>${["Expense","Investment","Income"].map(x=>`<option ${x==type?"selected":""}>${x}</option>`).join("")}</select>
+ <label>Date</label><input id=aDate type=date value="${editing?.date||new Date().toISOString().slice(0,10)}">
+ <label>${type==="Income"?"Source":"Merchant / Description"}</label><input id=aMerchant value="${esc(editing?.merchant||"")}" placeholder="e.g. Swiggy / Salary">
+ <label>Category</label><select id=aCat>${cats.map(x=>`<option ${x==editing?.category?"selected":""}>${x}</option>`).join("")}</select>
+ <label>Payment / Account</label><select id=aPay>${accounts.map(x=>`<option ${x==editing?.payment?"selected":""}>${x}</option>`).join("")}</select>
+ <label>Amount</label><input id=aAmount type=number inputmode=decimal value="${editing?.amount||""}" placeholder="0">
+ <label>Notes</label><textarea id=aNotes placeholder="Optional">${esc(editing?.notes||"")}</textarea>
+ <button class=primary id=saveBtn>${editing?"Update":"Save"} Transaction</button></div>`;
+
+ document.getElementById("aType").onchange=()=>{
+   const selectedType=document.getElementById("aType").value;
+   if(editing){
+     editing={...editing,type:selectedType};
+   }else{
+     window.newType=selectedType;
+   }
+   renderAdd();
+ };
+
+ document.getElementById("saveBtn").onclick=()=>{
+   const typeValue=document.getElementById("aType").value;
+   const dateValue=document.getElementById("aDate").value;
+   const merchantValue=document.getElementById("aMerchant").value.trim()||"Unnamed";
+   const categoryValue=document.getElementById("aCat").value;
+   const paymentValue=document.getElementById("aPay").value;
+   const amountValue=Number(document.getElementById("aAmount").value);
+   const notesValue=document.getElementById("aNotes").value.trim();
+
+   const obj={
+     id:editing?.id||crypto.randomUUID(),
+     date:dateValue,
+     type:typeValue,
+     merchant:merchantValue,
+     category:categoryValue,
+     payment:paymentValue,
+     amount:amountValue,
+     notes:notesValue,
+     created:editing?.created||Date.now(),
+     modified:Date.now()
+   };
+
+   if(!obj.date||!obj.amount||obj.amount<0)return alert("Enter a valid date and amount.");
+
+   if(editing){
+     tx=tx.map(x=>x.id==obj.id?obj:x);
+   }else{
+     tx.push(obj);
+   }
+
+   saveToCloud(obj);
+   editing=null;
+   window.newType=null;
+   save();
+   location.hash="home";
+   show("home");
+ };
+}
+function renderTx(){
+ const queryText=window.txQuery||"", typeFilter=window.txType||"All", categoryFilter=window.txCategory||"All";
+ let rows=tx.filter(x=>(typeFilter=="All"||x.type==typeFilter)&&(categoryFilter=="All"||x.category==categoryFilter)&&(!queryText||[x.merchant,x.category,x.notes,x.payment].join(" ").toLowerCase().includes(queryText.toLowerCase()))).sort((a,b)=>b.date.localeCompare(a.date)||b.created-a.created);
+ const cats=[...new Set(tx.flatMap(x=>typeCats(x.type)))];
+ document.querySelector("#transactions").innerHTML=`<div class=card><b>Transactions</b><label>Search</label><input id=txSearch value="${esc(queryText)}" placeholder="Search merchant, category..."><div class=grid><div><label>Type</label><select id=txTypeFilter><option>All</option><option>Expense</option><option>Investment</option><option>Income</option></select></div><div><label>Category</label><select id=txCategoryFilter><option>All</option>${cats.map(c=>`<option>${esc(c)}</option>`).join("")}</select></div></div></div><div class=card>${rows.length?rows.map(x=>`<div class=tx><div class=row><div>${txRow(x)}</div><div class=actions><button class=secondary onclick="editTx('${x.id}')">Edit</button><button class=secondary onclick="delTx('${x.id}')">Delete</button></div></div></div>`).join(""):"<div class=empty>No matching transactions</div>"}</div>`;
+ const searchEl=document.getElementById("txSearch");
+ const typeEl=document.getElementById("txTypeFilter");
+ const categoryEl=document.getElementById("txCategoryFilter");
+ typeEl.value=typeFilter;
+ categoryEl.value=categoryFilter;
+ searchEl.oninput=e=>{window.txQuery=e.target.value;renderTx()};
+ typeEl.onchange=e=>{window.txType=e.target.value;renderTx()};
+ categoryEl.onchange=e=>{window.txCategory=e.target.value;renderTx()};
+}
+function editTx(id){editing=tx.find(x=>x.id==id);window.newType=null;location.hash="add";show("add")}
+function delTx(id){if(confirm("Delete this transaction?")){tx=tx.filter(x=>x.id!=id);deleteFromCloud(id);save()}}
+function renderBudget(){
+ const b=JSON.parse(localStorage.getItem(BUD)||"{}"), inc=Number(localStorage.getItem(INC)||0);
+ document.querySelector("#budget").innerHTML=`<div class=card><b>Monthly Budget</b><label>Expected Monthly Income</label><input id=bi type=number value="${inc||""}"><label>Expense Budget</label><input id=be type=number value="${b.total||""}"><button class=primary id=bs>Save Budget</button></div><div class=card><b>Backup</b><div class=muted>Keep a CSV copy periodically for long-term portability.</div><button class=primary id=csv>Export CSV</button></div>`;
+ bs.onclick=()=>{localStorage.setItem(INC,Number(bi.value||0));localStorage.setItem(BUD,JSON.stringify({total:Number(be.value||0)}));alert("Budget saved")};
+ csv.onclick=exportCSV;
+}
+function exportCSV(){const cols=["id","date","type","merchant","category","payment","amount","notes","created","modified"];let s=cols.join(",")+"\\n"+tx.map(x=>cols.map(c=>`"${String(x[c]??"").replaceAll('"','""')}"`).join(",")).join("\\n");const a=document.createElement("a");a.href=URL.createObjectURL(new Blob([s],{type:"text/csv"}));a.download="expense-tracker-backup.csv";a.click()}
+document.querySelector("#numbersBtn").onclick=()=>{const x=tx[tx.length-1];if(!x)return alert("Add a transaction first.");const payload=["id","date","type","merchant","category","payment","amount","notes","created","modified"].map(k=>x[k]??"").join(" | ");location.href="shortcuts://run-shortcut?name=Expense%20to%20Numbers&input="+encodeURIComponent(payload)}
+document.getElementById("loginBtn").onclick=cloudLogin;document.getElementById("logoutBtn").onclick=cloudLogout;document.getElementById("syncBtn").onclick=syncLocalToCloud;supabaseClient.auth.onAuthStateChange(()=>setTimeout(refreshCloudSession,0));refreshCloudSession();
+window.addEventListener("hashchange",()=>show(location.hash.slice(1)||"home"));
+if("serviceWorker" in navigator) navigator.serviceWorker.register("sw.js?version=12").catch(()=>{});
+render();
+</script>
+</body>
+</html>
